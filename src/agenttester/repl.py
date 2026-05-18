@@ -24,6 +24,7 @@ from .providers import (
     OpenAICompatProvider,
     Provider,
 )
+from .questions import QuestionRegistry
 from .session import ReplSession
 from .skills import load_skills
 from .tools import ToolExecutor
@@ -366,6 +367,9 @@ async def run_repl(
             f"  ({n} message(s) across {len(session.histories)} model(s))[/dim]"
         )
 
+    # Shared question registry for ask_user tool
+    question_registry = QuestionRegistry()
+
     # Worktree + tool use setup — defaults to CWD so branches land in the
     # repo the REPL is invoked from when --workdir is not explicitly given.
     workdir_path = Path(workdir).resolve() if workdir else Path.cwd()
@@ -389,6 +393,7 @@ async def run_repl(
                     ),
                     model_name=mn,
                     notify_url=notify_url,
+                    question_registry=question_registry,
                 )
         else:
             git_mgr = None
@@ -402,6 +407,7 @@ async def run_repl(
                     pem_path=pem_path,
                     model_name=model.name,
                     notify_url=notify_url,
+                    question_registry=question_registry,
                 )
     except Exception:
         git_mgr = None
@@ -416,6 +422,7 @@ async def run_repl(
                 pem_path=pem_path,
                 model_name=model.name,
                 notify_url=notify_url,
+                question_registry=question_registry,
             )
 
     # Skill seeding
@@ -438,10 +445,12 @@ async def run_repl(
     for model in models.values():
         with contextlib.suppress(OSError):
             model.event_logger = EventLogger(session_name, model.name)
+            if model.tool_executor is not None:
+                model.tool_executor._on_event = _make_event_handler(model.event_logger)
 
     console.print(
-        "\n[dim]Commands: /reset (clear history), @model <msg> to address one model, "
-        "exit or Ctrl-C to quit[/dim]\n"
+        "\n[dim]Commands: /reset (clear history), /reply @model <response>,"
+        " @model <msg> to address one model, exit or Ctrl-C to quit[/dim]\n"
     )
 
     history_file = Path.home() / ".config" / "agenttester" / "repl_history"
@@ -457,6 +466,18 @@ async def run_repl(
     _ctrl_c_once = False
     try:
         while True:
+            pending_qs = question_registry.pending()
+            if pending_qs:
+                names = ", ".join(q.model_name for q in pending_qs)
+                n = len(pending_qs)
+                label = "model" if n == 1 else "models"
+                console.print(
+                    f"[bold yellow]{n} {label} waiting for response: "
+                    f"{names}[/bold yellow]"
+                    "  [dim](use /reply @model <response> "
+                    "or watch the model for details)[/dim]"
+                )
+
             try:
                 raw = await session_obj.prompt_async("> ")
                 _ctrl_c_once = False
@@ -478,6 +499,32 @@ async def run_repl(
                 for model in models.values():
                     model.messages = list(seed)
                 console.print("[dim]Context cleared.[/dim]\n")
+                continue
+
+            if raw.startswith("/reply "):
+                reply_rest = raw[7:].strip()
+                if reply_rest.startswith("@"):
+                    parts = reply_rest[1:].split(None, 1)
+                    target = parts[0] if parts else ""
+                    response_text = parts[1] if len(parts) > 1 else ""
+                    if not response_text:
+                        console.print(
+                            "[yellow]Usage: /reply @model <response>[/yellow]\n"
+                        )
+                        continue
+                    if question_registry.respond(target, response_text):
+                        console.print(
+                            f"[dim]Sent response to {target}.[/dim]\n"
+                        )
+                    else:
+                        console.print(
+                            f"[yellow]{target} is not waiting for a"
+                            " response.[/yellow]\n"
+                        )
+                else:
+                    console.print(
+                        "[yellow]Usage: /reply @model <response>[/yellow]\n"
+                    )
                 continue
 
             # @model routing: "@name rest of message" targets a single model
@@ -554,6 +601,7 @@ async def run_repl(
                     console.print(f"  [dim]still working: {', '.join(pending)}[/dim]")
             console.print()
     finally:
+        question_registry.cancel_all()
         for name, model in models.items():
             session.histories[name] = list(model.messages)
         session.save()
