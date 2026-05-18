@@ -505,7 +505,7 @@ async def run_repl(
         bottom_toolbar=_toolbar,
     )
 
-    _ctrl_c_once = False
+    _ctrl_c_at: float | None = None
     _stdout_ctx = patch_stdout()
     _stdout_ctx.__enter__()
     try:
@@ -515,12 +515,15 @@ async def run_repl(
 
             try:
                 raw = await session_obj.prompt_async("> ")
-                _ctrl_c_once = False
+                _ctrl_c_at = None
             except KeyboardInterrupt:
-                if _ctrl_c_once:
+                import time
+
+                now = time.monotonic()
+                if _ctrl_c_at is not None and (now - _ctrl_c_at) < 2.0:
                     break
-                _ctrl_c_once = True
-                console.print("[dim](press Ctrl-C again to exit)[/dim]")
+                _ctrl_c_at = now
+                console.print("[dim](press Ctrl-C again within 2s to exit)[/dim]")
                 continue
             except EOFError:
                 break
