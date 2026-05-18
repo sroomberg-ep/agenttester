@@ -59,6 +59,7 @@ class Model:
     model_id: str
     provider: Provider
     max_tokens: int = 4096
+    max_turns: int = 100
     messages: list[dict] = field(default_factory=list)
     tool_executor: ToolExecutor | None = None
     event_logger: EventLogger | None = None
@@ -103,6 +104,7 @@ def _parse_models_from_file(path: Path) -> dict[str, Model]:
             model_id=model_cfg["model"],
             provider=prov,
             max_tokens=model_cfg.get("max_tokens", 4096),
+            max_turns=model_cfg.get("max_turns", 100),
         )
 
     # Backward compat: discover OpenAI-compatible models from agent commands
@@ -161,6 +163,7 @@ async def _query_async(
                 model.messages,
                 prompt,
                 model.tool_executor,
+                max_turns=model.max_turns,
                 max_tokens=model.max_tokens,
                 on_event=on_event,
             )
