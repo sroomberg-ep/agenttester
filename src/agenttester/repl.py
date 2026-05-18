@@ -58,6 +58,7 @@ class Model:
     name: str
     model_id: str
     provider: Provider
+    max_tokens: int = 4096
     messages: list[dict] = field(default_factory=list)
     tool_executor: ToolExecutor | None = None
     event_logger: EventLogger | None = None
@@ -97,7 +98,12 @@ def _parse_models_from_file(path: Path) -> dict[str, Model]:
                 endpoint=endpoint,
                 api_key_env=model_cfg.get("api_key_env"),
             )
-        result[name] = Model(name=name, model_id=model_cfg["model"], provider=prov)
+        result[name] = Model(
+            name=name,
+            model_id=model_cfg["model"],
+            provider=prov,
+            max_tokens=model_cfg.get("max_tokens", 4096),
+        )
 
     # Backward compat: discover OpenAI-compatible models from agent commands
     for name, agent_data in (data.get("agents") or {}).items():
@@ -145,7 +151,7 @@ async def _query_async(
     providers; falls back to async_call for Bedrock and other providers.
     """
     if model.tool_executor and isinstance(
-        model.provider, (AnthropicProvider, OpenAICompatProvider)
+        model.provider, (AnthropicProvider, BedrockProvider, OpenAICompatProvider)
     ):
         saved = list(model.messages)
         try:
@@ -155,13 +161,15 @@ async def _query_async(
                 model.messages,
                 prompt,
                 model.tool_executor,
+                max_tokens=model.max_tokens,
                 on_event=on_event,
             )
         except Exception as e:
             model.messages[:] = saved
             return f"[error] {e}"
 
-    if isinstance(model.provider, (AnthropicProvider, OpenAICompatProvider)):
+    streaming_providers = (AnthropicProvider, BedrockProvider, OpenAICompatProvider)
+    if isinstance(model.provider, streaming_providers):
         # Streaming, no tool use — stream text chunks directly.
         model.messages.append({"role": "user", "content": prompt})
         parts: list[str] = []
@@ -173,7 +181,7 @@ async def _query_async(
 
         try:
             result = await model.provider.async_stream_raw(
-                model.model_id, model.messages, max_tokens, on_chunk=_on_chunk
+                model.model_id, model.messages, model.max_tokens, on_chunk=_on_chunk
             )
             reply = result.get("content") or "".join(parts)
         except Exception as e:

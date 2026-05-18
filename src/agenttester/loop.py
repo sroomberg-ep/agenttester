@@ -17,6 +17,7 @@ async def run_agent_loop(
     prompt: str,
     executor: ToolExecutor,
     max_turns: int = 20,
+    max_tokens: int = 4096,
     on_event: Callable[[str, str], None] | None = None,
 ) -> str:
     """Async tool-use agent loop, mutating *messages* in place.
@@ -40,7 +41,7 @@ async def run_agent_loop(
         msg = await provider.async_stream_raw(
             model_id,
             messages,
-            4096,
+            max_tokens,
             tools=executor.tool_definitions,
             on_chunk=_on_chunk,
         )
