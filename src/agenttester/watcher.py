@@ -4,16 +4,38 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sys
 import time
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.text import Text
 
 from .events import EventLogger
 
 _DIVIDER = "─" * 60
+_TAG_RE = re.compile(r"(</?[\w_-]+(?:\s[^>]*)?>)")
+_CONSECUTIVE_NEWLINES_RE = re.compile(r"\n{3,}")
+
+
+def _collapse_blank_lines(text: str) -> str:
+    """Collapse 3+ consecutive newlines down to 2 (one blank line)."""
+    return _CONSECUTIVE_NEWLINES_RE.sub("\n\n", text)
+
+
+def _format_response(content: str) -> Text | Markdown | Syntax:
+    """Choose the best Rich renderable for a response body.
+
+    If the content contains XML-style tags, render as XML syntax.
+    Otherwise render as Markdown.
+    """
+    content = _collapse_blank_lines(content)
+    if _TAG_RE.search(content):
+        return Syntax(content, "xml", word_wrap=True, theme="monokai")
+    return Markdown(content)
 
 
 def _render_event(console: Console, model_name: str, event: dict) -> None:
@@ -32,7 +54,7 @@ def _render_event(console: Console, model_name: str, event: dict) -> None:
     elif event_type == "response":
         console.print(
             Panel(
-                Markdown(content),
+                _format_response(content),
                 title=f"[bold]{model_name}[/bold]",
                 border_style="blue",
             )
@@ -67,14 +89,16 @@ def run_watcher(session_id: str, model_name: str) -> None:
         console.print("[dim]Waiting for activity…[/dim]")
 
     _in_stream = False
+    _trailing_newlines = 0
 
     def _close_stream() -> None:
-        nonlocal _in_stream
+        nonlocal _in_stream, _trailing_newlines
         if _in_stream:
             sys.stdout.write("\n")
             sys.stdout.flush()
             console.print(f"[dim]{_DIVIDER}[/dim]")
             _in_stream = False
+            _trailing_newlines = 0
 
     try:
         while not event_path.exists():
@@ -113,8 +137,20 @@ def run_watcher(session_id: str, model_name: str) -> None:
                                 f"[dim]{_DIVIDER}[/dim]"
                             )
                             _in_stream = True
-                        sys.stdout.write(content)
-                        sys.stdout.flush()
+                            _trailing_newlines = 0
+                        # Collapse excessive blank lines in streamed output
+                        filtered = []
+                        for ch in content:
+                            if ch == "\n":
+                                _trailing_newlines += 1
+                                if _trailing_newlines <= 2:
+                                    filtered.append(ch)
+                            else:
+                                _trailing_newlines = 0
+                                filtered.append(ch)
+                        if filtered:
+                            sys.stdout.write("".join(filtered))
+                            sys.stdout.flush()
 
                     elif etype == "response":
                         if _in_stream:

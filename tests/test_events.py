@@ -126,3 +126,49 @@ class TestRenderEvent:
     def test_unknown_type_produces_no_output(self) -> None:
         out = self._render({"type": "unknown", "content": "x"})
         assert out.strip() == ""
+
+    def test_waiting_rendered(self) -> None:
+        out = self._render({"type": "waiting", "content": "which file?"})
+        assert "which file?" in out
+        assert "/reply @test-model" in out
+
+
+class TestFormatResponse:
+    """Test _format_response and _collapse_blank_lines."""
+
+    def test_collapse_blank_lines(self) -> None:
+        from agenttester.watcher import _collapse_blank_lines
+
+        text = "hello\n\n\n\n\nworld"
+        assert _collapse_blank_lines(text) == "hello\n\nworld"
+
+    def test_two_newlines_preserved(self) -> None:
+        from agenttester.watcher import _collapse_blank_lines
+
+        text = "hello\n\nworld"
+        assert _collapse_blank_lines(text) == "hello\n\nworld"
+
+    def test_xml_tags_detected(self) -> None:
+        from rich.syntax import Syntax
+
+        from agenttester.watcher import _format_response
+
+        result = _format_response("<function_call>\ndo stuff\n</function_call>")
+        assert isinstance(result, Syntax)
+
+    def test_plain_text_uses_markdown(self) -> None:
+        from rich.markdown import Markdown
+
+        from agenttester.watcher import _format_response
+
+        result = _format_response("Here is some **bold** text")
+        assert isinstance(result, Markdown)
+
+    def test_mixed_content_with_tags(self) -> None:
+        from rich.syntax import Syntax
+
+        from agenttester.watcher import _format_response
+
+        content = "I'll call a function:\n<tool_call>\nread file\n</tool_call>"
+        result = _format_response(content)
+        assert isinstance(result, Syntax)
