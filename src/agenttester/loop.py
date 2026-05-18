@@ -117,13 +117,14 @@ async def run_agent_loop(
                 f"Reached {turns_used} tool turns without a final response. "
                 "Send a message to continue, or reply 'stop' to end.",
             )
+            if continuation is None:
+                # Timed out or session exiting — stop cleanly without
+                # polluting message history. The conversation can be
+                # resumed later with a new prompt.
+                return ""
             if continuation.lower().strip() in ("stop", "quit", "exit"):
-                text = f"[stopped by user after {turns_used} turns]"
-                messages.append({"role": "assistant", "content": text})
-                return text
+                return ""
             messages.append({"role": "user", "content": continuation})
             turns_used = 0
         else:
-            text = "[max turns reached without final response]"
-            messages.append({"role": "assistant", "content": text})
-            return text
+            return ""

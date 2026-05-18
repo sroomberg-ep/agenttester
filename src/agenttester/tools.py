@@ -381,4 +381,7 @@ class ToolExecutor:
             return "ask_user is not available in this context."
         if self._on_event:
             self._on_event("waiting", question)
-        return self._question_registry.ask(self._model_name or "unknown", question)
+        result = self._question_registry.ask(self._model_name or "unknown", question)
+        if result is None:
+            return "[no response — timed out]"
+        return result

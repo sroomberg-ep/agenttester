@@ -33,14 +33,14 @@ class TestQuestionRegistry:
         registry = QuestionRegistry()
         assert registry.respond("nobody", "hello") is False
 
-    def test_timeout_returns_message(self) -> None:
+    def test_timeout_returns_none(self) -> None:
         registry = QuestionRegistry()
         result = registry.ask("model-b", "anything?", timeout=0.05)
-        assert "timed out" in result
+        assert result is None
 
     def test_cancel_all_unblocks_waiting(self) -> None:
         registry = QuestionRegistry()
-        result_holder: list[str] = []
+        result_holder: list = []
 
         def asker():
             result_holder.append(registry.ask("model-c", "hey?"))
@@ -51,7 +51,7 @@ class TestQuestionRegistry:
 
         registry.cancel_all()
         t.join(timeout=1)
-        assert "session ended" in result_holder[0]
+        assert result_holder[0] is None
 
     def test_multiple_models_waiting(self) -> None:
         registry = QuestionRegistry()
