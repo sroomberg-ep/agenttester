@@ -481,9 +481,21 @@ async def run_repl(
     # Branch slug negotiated once on the first prompt; reused for the whole session.
     _session_branch_slug: str | None = None
 
+    # Background tasks for model runs — kept alive across prompt iterations
+    _background_tasks: set[asyncio.Task] = set()
+
     _ctrl_c_once = False
     try:
         while True:
+            # Clean up finished background tasks
+            _background_tasks -= {t for t in _background_tasks if t.done()}
+
+            running = len(_background_tasks)
+            if running:
+                console.print(
+                    f"[dim]{running} model(s) running in background[/dim]"
+                )
+
             pending_qs = question_registry.pending()
             if pending_qs:
                 names = ", ".join(q.model_name for q in pending_qs)
@@ -595,35 +607,38 @@ async def run_repl(
             n = len(target_models)
             label = "model" if n == 1 else "models"
             model_list = ", ".join(target_models)
-            console.print(f"[dim]Querying {n} {label}: {model_list}…[/dim]")
+            console.print(f"[dim]Querying {n} {label}: {model_list}…[/dim]\n")
 
-            tasks = [
-                asyncio.create_task(
-                    _run_one(
-                        nm, m, prompt_text,
-                        _make_event_handler(m.event_logger),
+            for nm, m in target_models.items():
+
+                async def _background_run(
+                    _nm: str = nm, _m: Model = m,
+                    _prompt: str = prompt_text,
+                ) -> None:
+                    _, reply = await _run_one(
+                        _nm, _m, _prompt,
+                        _make_event_handler(_m.event_logger),
                         question_registry,
                     )
-                )
-                for nm, m in target_models.items()
-            ]
-            pending = list(target_models)
-            for coro in asyncio.as_completed(tasks):
-                name, reply = await coro
-                pending.remove(name)
-                m = target_models[name]
-                if m.event_logger is not None:
-                    m.event_logger.log("response", reply)
-                    m.event_logger.log("status", "waiting for next instructions")
-                if reply.startswith("[error]"):
-                    console.print(f"  [red]✗ {name}[/red]: {reply[:100]}")
-                else:
-                    console.print(f"  [green]✓[/green] [bold]{name}[/bold]: done")
-                if pending:
-                    console.print(f"  [dim]still working: {', '.join(pending)}[/dim]")
-            console.print()
+                    if _m.event_logger is not None:
+                        _m.event_logger.log("response", reply)
+                        _m.event_logger.log(
+                            "status", "waiting for next instructions"
+                        )
+                    if reply.startswith("[error]"):
+                        console.print(
+                            f"  [red]✗ {_nm}[/red]: {reply[:100]}"
+                        )
+                    else:
+                        console.print(
+                            f"  [green]✓[/green] [bold]{_nm}[/bold]: done"
+                        )
+
+                _background_tasks.add(asyncio.create_task(_background_run()))
     finally:
         question_registry.cancel_all()
+        for task in _background_tasks:
+            task.cancel()
         for name, model in models.items():
             session.histories[name] = list(model.messages)
         session.save()
