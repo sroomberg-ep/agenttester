@@ -483,6 +483,7 @@ async def run_repl(
 
     # Background tasks for model runs — kept alive across prompt iterations
     _background_tasks: set[asyncio.Task] = set()
+    _shutting_down = False
 
     _ctrl_c_once = False
     try:
@@ -617,11 +618,16 @@ async def run_repl(
                     _nm: str = nm, _m: Model = m,
                     _prompt: str = prompt_text,
                 ) -> None:
-                    _, reply = await _run_one(
-                        _nm, _m, _prompt,
-                        _make_event_handler(_m.event_logger),
-                        question_registry,
-                    )
+                    try:
+                        _, reply = await _run_one(
+                            _nm, _m, _prompt,
+                            _make_event_handler(_m.event_logger),
+                            question_registry,
+                        )
+                    except asyncio.CancelledError:
+                        if _m.event_logger is not None:
+                            _m.event_logger.log("status", "stopped")
+                        return
                     if _m.event_logger is not None:
                         _m.event_logger.log("response", reply)
                         _m.event_logger.log(
@@ -638,9 +644,24 @@ async def run_repl(
 
                 _background_tasks.add(asyncio.create_task(_background_run()))
     finally:
+        _shutting_down = True
         question_registry.cancel_all()
-        for task in _background_tasks:
-            task.cancel()
+
+        # Give background tasks a moment to finish current tool execution
+        if _background_tasks:
+            console.print(
+                f"[dim]Waiting for {len(_background_tasks)} task(s) to stop…[/dim]"
+            )
+            _, still_running = await asyncio.wait(
+                _background_tasks, timeout=5.0
+            )
+            for task in still_running:
+                task.cancel()
+            # Suppress CancelledError from cancelled tasks
+            for task in _background_tasks:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.shield(task)
+
         for name, model in models.items():
             session.histories[name] = list(model.messages)
         session.save()
