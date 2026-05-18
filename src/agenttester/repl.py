@@ -579,12 +579,14 @@ async def run_repl(
 
             # Negotiate branch name once per session on the first prompt
             if _session_branch_slug is None:
+                short_session = session_name[:8]
                 if git_mgr is not None and git_mgr.has_commits():
-                    _session_branch_slug = await _negotiate_branch_name(
+                    feature_slug = await _negotiate_branch_name(
                         target_models, prompt_text, git_mgr, console
                     )
                 else:
-                    _session_branch_slug = _sanitize_ref_component(prompt_text[:60])
+                    feature_slug = _sanitize_ref_component(prompt_text[:60])
+                _session_branch_slug = f"{short_session}-{feature_slug}"
                 # Record potential branch names for all models once
                 for m in models.values():
                     branch_name = (
