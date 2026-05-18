@@ -11,7 +11,9 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 
 from .config import _build_named_provider, _load_yaml, get_config_paths
@@ -473,10 +475,6 @@ async def run_repl(
 
     history_file = Path.home() / ".config" / "agenttester" / "repl_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
-    session_obj: PromptSession = PromptSession(
-        completer=_ModelCompleter(list(models)),
-        history=FileHistory(str(history_file)),
-    )
 
     # Branch slug negotiated once on the first prompt; reused for the whole session.
     _session_branch_slug: str | None = None
@@ -485,29 +483,35 @@ async def run_repl(
     _background_tasks: set[asyncio.Task] = set()
     _shutting_down = False
 
+    def _toolbar() -> HTML:
+        """Dynamic bottom toolbar showing running/waiting status."""
+        active = [t for t in _background_tasks if not t.done()]
+        parts: list[str] = []
+        if active:
+            parts.append(f"<b>{len(active)} running</b>")
+        pending_qs = question_registry.pending()
+        if pending_qs:
+            names = ", ".join(q.model_name for q in pending_qs)
+            parts.append(
+                f"<ansiyellow>{len(pending_qs)} waiting: {names}</ansiyellow>"
+            )
+        if not parts:
+            return HTML("<ansigreen>ready</ansigreen>")
+        return HTML(" | ".join(parts))
+
+    session_obj: PromptSession = PromptSession(
+        completer=_ModelCompleter(list(models)),
+        history=FileHistory(str(history_file)),
+        bottom_toolbar=_toolbar,
+    )
+
     _ctrl_c_once = False
+    _stdout_ctx = patch_stdout()
+    _stdout_ctx.__enter__()
     try:
         while True:
             # Clean up finished background tasks
             _background_tasks -= {t for t in _background_tasks if t.done()}
-
-            running = len(_background_tasks)
-            if running:
-                console.print(
-                    f"[dim]{running} model(s) running in background[/dim]"
-                )
-
-            pending_qs = question_registry.pending()
-            if pending_qs:
-                names = ", ".join(q.model_name for q in pending_qs)
-                n = len(pending_qs)
-                label = "model" if n == 1 else "models"
-                console.print(
-                    f"[bold yellow]{n} {label} waiting for response: "
-                    f"{names}[/bold yellow]"
-                    "  [dim](use /reply @model <response> "
-                    "or watch the model for details)[/dim]"
-                )
 
             try:
                 raw = await session_obj.prompt_async("> ")
@@ -644,6 +648,7 @@ async def run_repl(
 
                 _background_tasks.add(asyncio.create_task(_background_run()))
     finally:
+        _stdout_ctx.__exit__(None, None, None)
         _shutting_down = True
         question_registry.cancel_all()
 
