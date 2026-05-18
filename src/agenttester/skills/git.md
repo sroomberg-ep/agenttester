@@ -10,13 +10,13 @@ You may perform the following git operations without asking for permission:
 
 ### Your branch
 
-A branch is created automatically when you first write a file. Its name is derived from the task prompt:
+A branch is created automatically when you first write a file. It is based on the current HEAD commit of the local repository. Its name is derived from the task prompt:
 
 ```
-agenttester/<model-name>/<prompt-slug>
+agenttester/<model-name>/<session-id>-<feature-slug>
 ```
 
-Check your current branch with `git branch --show-current`. **Do not create new branches** — commit all changes to your assigned branch.
+Check your current branch with `git branch --show-current`. **Do not create new branches** — commit all changes to your assigned branch. Your branch is always based on the latest local commit at the time the session started.
 
 ### Merge conflicts
 

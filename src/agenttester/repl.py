@@ -282,9 +282,8 @@ async def _negotiate_branch_name(
 ) -> str:
     """Negotiate a branch name across all models (max 2 rounds).
 
-    Returns ``<short-hash>-<feature-name>``.
+    Returns the feature name slug (session ID is prepended by the caller).
     """
-    short_hash = git_mgr.short_head_hash()
     naming_instruction = (
         "Reply with ONLY a short kebab-case git branch name (2-5 words, no slashes "
         "or prefixes) describing the following task. Nothing else."
@@ -312,9 +311,8 @@ async def _negotiate_branch_name(
             console.print(f"  [dim]round 2 · {nm}: {name}[/dim]")
         feature = _best_name(list(proposals2.values()))
 
-    slug = f"{short_hash}-{feature}"
-    console.print(f"  [dim]→ {slug}[/dim]")
-    return slug
+    console.print(f"  [dim]→ {feature}[/dim]")
+    return feature
 
 
 def _make_event_handler(
