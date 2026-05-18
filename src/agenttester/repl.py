@@ -148,6 +148,7 @@ async def _query_async(
     prompt: str,
     max_tokens: int = 2048,
     on_event: Callable[[str, str], None] | None = None,
+    question_registry: QuestionRegistry | None = None,
 ) -> str:
     """Async query path: uses the full streaming agent loop for OpenAI/Anthropic
     providers; falls back to async_call for Bedrock and other providers.
@@ -166,6 +167,8 @@ async def _query_async(
                 max_turns=model.max_turns,
                 max_tokens=model.max_tokens,
                 on_event=on_event,
+                question_registry=question_registry,
+                model_name=model.name,
             )
         except Exception as e:
             model.messages[:] = saved
@@ -228,9 +231,13 @@ async def _run_one(
     model: Model,
     prompt: str,
     on_event: Callable[[str, str], None] | None = None,
+    question_registry: QuestionRegistry | None = None,
 ) -> tuple[str, str]:
     try:
-        r = await _query_async(model, prompt, on_event=on_event)
+        r = await _query_async(
+            model, prompt, on_event=on_event,
+            question_registry=question_registry,
+        )
     except Exception as exc:
         r = str(exc)
     return name, r
@@ -592,7 +599,11 @@ async def run_repl(
 
             tasks = [
                 asyncio.create_task(
-                    _run_one(nm, m, prompt_text, _make_event_handler(m.event_logger))
+                    _run_one(
+                        nm, m, prompt_text,
+                        _make_event_handler(m.event_logger),
+                        question_registry,
+                    )
                 )
                 for nm, m in target_models.items()
             ]
