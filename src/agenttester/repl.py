@@ -506,7 +506,7 @@ async def run_repl(
     )
 
     _ctrl_c_at: float | None = None
-    _stdout_ctx = patch_stdout()
+    _stdout_ctx = patch_stdout(raw=True)
     _stdout_ctx.__enter__()
     try:
         while True:
