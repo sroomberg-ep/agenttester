@@ -61,6 +61,7 @@ async def run_agent_loop(
         for tc in tool_calls:
             fn = tc.get("function", {})
             tool_name = fn.get("name", "")
+            tool_id = tc.get("id", "")
             try:
                 arguments = json.loads(fn.get("arguments") or "{}")
             except json.JSONDecodeError:
@@ -69,16 +70,24 @@ async def run_agent_loop(
             if on_event:
                 on_event("tool_call", f"{tool_name}: {fn.get('arguments', '')}")
 
-            result = await asyncio.to_thread(executor.execute, tool_name, arguments)
+            try:
+                result = await asyncio.to_thread(
+                    executor.execute, tool_name, arguments
+                )
+            except Exception as e:
+                result = f"Error executing {tool_name}: {e}"
 
             if on_event:
                 on_event("tool_result", result)
 
+            if not tool_id:
+                tool_id = f"call_{tool_name}_{id(tc)}"
+
             messages.append(
                 {
                     "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
-                    "content": result,
+                    "tool_call_id": tool_id,
+                    "content": result or "(no output)",
                 }
             )
 

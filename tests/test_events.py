@@ -113,7 +113,8 @@ class TestRenderEvent:
 
     def test_tool_call_rendered(self) -> None:
         out = self._render({"type": "tool_call", "content": "bash: ls"})
-        assert "bash: ls" in out
+        assert "bash" in out
+        assert "ls" in out
 
     def test_tool_result_rendered(self) -> None:
         out = self._render({"type": "tool_result", "content": "file.py"})

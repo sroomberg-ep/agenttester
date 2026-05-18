@@ -47,11 +47,11 @@ def _format_function_call(invoke_match: re.Match) -> str:
     params_raw = invoke_match.group(2)
     params = _PARAM_RE.findall(params_raw)
     if len(params) == 1 and params[0][0] == "command":
-        return f"  → `{name}`: `{params[0][1].strip()}`"
+        return f"  `{name}`: `{params[0][1].strip()}`"
     if params:
-        parts = ", ".join(f"{k}=`{v.strip()}`" for k, v in params)
-        return f"  → `{name}`: {parts}"
-    return f"  → `{name}`"
+        parts = "\n".join(f"    {k}: `{v.strip()}`" for k, v in params)
+        return f"  `{name}`:\n{parts}"
+    return f"  `{name}`"
 
 
 def _strip_xml_tags(text: str) -> str:
@@ -88,12 +88,22 @@ def _render_event(console: Console, model_name: str, event: dict) -> None:
     if event_type == "prompt":
         console.print(f"\n[bold green]>[/bold green] {content}\n")
     elif event_type == "tool_call":
-        short = content[:120].replace("\n", " ")
-        console.print(f"  [dim]→ {short}[/dim]")
+        if ": " in content:
+            tool_name, args = content.split(": ", 1)
+            args_short = args[:100].replace("\n", " ")
+            console.print(f"  [bold cyan]{tool_name}[/bold cyan]")
+            console.print(f"    [dim]{args_short}[/dim]")
+        else:
+            console.print(f"  [bold cyan]{content[:120]}[/bold cyan]")
     elif event_type == "tool_result":
-        short = content[:80].replace("\n", " ")
-        suffix = "…" if len(content) > 80 else ""
-        console.print(f"  [dim]← {short}{suffix}[/dim]")
+        lines = content.strip().splitlines()
+        if len(lines) <= 5:
+            for line in lines:
+                console.print(f"    [dim]{line}[/dim]")
+        else:
+            for line in lines[:4]:
+                console.print(f"    [dim]{line}[/dim]")
+            console.print(f"    [dim]… ({len(lines) - 4} more lines)[/dim]")
     elif event_type == "response":
         console.print(
             Panel(
