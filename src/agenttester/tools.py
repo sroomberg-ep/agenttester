@@ -341,7 +341,23 @@ class ToolExecutor:
             return add
         return self._run(["git", "commit", "-m", message])
 
+    @property
+    def _allowed_branch(self) -> str | None:
+        """The only branch name this executor is allowed to push."""
+        if self._model_name and self._branch_slug:
+            from .git_manager import _sanitize_ref_component
+
+            safe_model = _sanitize_ref_component(self._model_name)
+            return f"agenttester/{safe_model}/{self._branch_slug}"
+        return None
+
     def _tool_git_push(self, branch: str, remote: str = "origin") -> str:
+        allowed = self._allowed_branch
+        if allowed and branch != allowed:
+            return (
+                f"Error: you may only push your assigned branch "
+                f"'{allowed}'. Got '{branch}'."
+            )
         url_result = subprocess.run(
             ["git", "remote", "get-url", remote],
             capture_output=True,

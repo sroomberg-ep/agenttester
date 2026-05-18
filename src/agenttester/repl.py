@@ -644,4 +644,15 @@ async def run_repl(
         for name, model in models.items():
             session.histories[name] = list(model.messages)
         session.save()
+
+        # Clean up stray local branches not in the session's expected set
+        if git_mgr is not None and session.branches and _session_branch_slug:
+            allowed = set(session.branches)
+            for branch in git_mgr.list_agenttester_branches():
+                if branch not in allowed and _session_branch_slug in branch:
+                    import contextlib as _ctx
+
+                    with _ctx.suppress(Exception):
+                        git_mgr.delete_local_branch(branch)
+
         console.print(f"\n[dim]bye  —  agent-tester --resume {session_name}[/dim]")
