@@ -28,6 +28,12 @@ Resolve conflicts automatically without asking for confirmation:
 4. Continue the operation (`git rebase --continue` or `git merge --continue`).
 5. If a conflict cannot be resolved safely (e.g., incompatible semantic changes), abort with `git rebase --abort` or `git merge --abort` and report the situation.
 
+### Pushing your work
+
+**Always push your branch to the remote when you are done.** After your final commit, run `git push -u origin <branch-name>` using the `git_push` tool. Do not wait to be asked — push automatically as the last step before reporting completion.
+
+If you make multiple commits during a task, you only need to push once at the end.
+
 ### Rules
 
 - **Never push to a repository other than the one you are working in.** You may only push to remotes that were configured in the working repository when you started. Do not add new remotes and do not use the `bash` tool to push to external URLs.
