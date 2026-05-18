@@ -11,14 +11,29 @@ import time
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.syntax import Syntax
-from rich.text import Text
 
 from .events import EventLogger
 
 _DIVIDER = "─" * 60
-_TAG_RE = re.compile(r"(</?[\w_-]+(?:\s[^>]*)?>)")
 _CONSECUTIVE_NEWLINES_RE = re.compile(r"\n{3,}")
+
+# Matches a full <function_calls>...</function_calls> block (or partial/unclosed)
+_FUNC_CALL_BLOCK_RE = re.compile(
+    r"<function_calls>\s*(?:<invoke\s+name=\"([^\"]+)\">\s*"
+    r"((?:<parameter\s+name=\"[^\"]+\">[^<]*</parameter>\s*)*)"
+    r"</invoke>\s*)*</function_calls>",
+    re.DOTALL,
+)
+_INVOKE_RE = re.compile(
+    r"<invoke\s+name=\"([^\"]+)\">\s*((?:<parameter[^>]*>[^<]*</parameter>\s*)*)"
+    r"</invoke>",
+    re.DOTALL,
+)
+_PARAM_RE = re.compile(
+    r"<parameter\s+name=\"([^\"]+)\">([^<]*)</parameter>"
+)
+# Catch any remaining XML-style tags
+_TAG_RE = re.compile(r"</?[\w_-]+(?:\s[^>]*)?>")
 
 
 def _collapse_blank_lines(text: str) -> str:
@@ -26,15 +41,43 @@ def _collapse_blank_lines(text: str) -> str:
     return _CONSECUTIVE_NEWLINES_RE.sub("\n\n", text)
 
 
-def _format_response(content: str) -> Text | Markdown | Syntax:
-    """Choose the best Rich renderable for a response body.
+def _format_function_call(invoke_match: re.Match) -> str:
+    """Format a single <invoke> block into readable text."""
+    name = invoke_match.group(1)
+    params_raw = invoke_match.group(2)
+    params = _PARAM_RE.findall(params_raw)
+    if len(params) == 1 and params[0][0] == "command":
+        return f"  → `{name}`: `{params[0][1].strip()}`"
+    if params:
+        parts = ", ".join(f"{k}=`{v.strip()}`" for k, v in params)
+        return f"  → `{name}`: {parts}"
+    return f"  → `{name}`"
 
-    If the content contains XML-style tags, render as XML syntax.
-    Otherwise render as Markdown.
+
+def _strip_xml_tags(text: str) -> str:
+    """Remove any remaining XML tags from text."""
+    return _TAG_RE.sub("", text)
+
+
+def _format_response(content: str) -> Markdown:
+    """Format a response body for display.
+
+    Parses XML function call blocks into readable code-formatted lines.
+    Strips any remaining XML tags. Renders as Markdown.
     """
     content = _collapse_blank_lines(content)
-    if _TAG_RE.search(content):
-        return Syntax(content, "xml", word_wrap=True, theme="monokai")
+
+    def _replace_block(match: re.Match) -> str:
+        block = match.group(0)
+        invocations = _INVOKE_RE.findall(block)
+        if not invocations:
+            return ""
+        lines = [_format_function_call(m) for m in _INVOKE_RE.finditer(block)]
+        return "\n".join(lines)
+
+    content = _FUNC_CALL_BLOCK_RE.sub(_replace_block, content)
+    content = _strip_xml_tags(content)
+    content = _collapse_blank_lines(content.strip())
     return Markdown(content)
 
 
@@ -69,6 +112,41 @@ def _render_event(console: Console, model_name: str, event: dict) -> None:
         console.print(f"[dim]● {content}[/dim]")
 
 
+class _StreamFilter:
+    """Buffers streaming text to strip XML tags and collapse blank lines."""
+
+    def __init__(self) -> None:
+        self._trailing_newlines = 0
+        self._in_tag = False
+        self._tag_buf = ""
+
+    def feed(self, content: str) -> str:
+        """Process a chunk and return filtered text to display."""
+        output: list[str] = []
+        for ch in content:
+            if self._in_tag:
+                self._tag_buf += ch
+                if ch == ">":
+                    self._in_tag = False
+                    self._tag_buf = ""
+            elif ch == "<":
+                self._in_tag = True
+                self._tag_buf = "<"
+            elif ch == "\n":
+                self._trailing_newlines += 1
+                if self._trailing_newlines <= 2:
+                    output.append(ch)
+            else:
+                self._trailing_newlines = 0
+                output.append(ch)
+        return "".join(output)
+
+    def reset(self) -> None:
+        self._trailing_newlines = 0
+        self._in_tag = False
+        self._tag_buf = ""
+
+
 def run_watcher(session_id: str, model_name: str) -> None:
     """Tail-follow a model's event log, rendering each event as it arrives."""
     console = Console()
@@ -89,16 +167,16 @@ def run_watcher(session_id: str, model_name: str) -> None:
         console.print("[dim]Waiting for activity…[/dim]")
 
     _in_stream = False
-    _trailing_newlines = 0
+    _stream_filter = _StreamFilter()
 
     def _close_stream() -> None:
-        nonlocal _in_stream, _trailing_newlines
+        nonlocal _in_stream
         if _in_stream:
             sys.stdout.write("\n")
             sys.stdout.flush()
             console.print(f"[dim]{_DIVIDER}[/dim]")
             _in_stream = False
-            _trailing_newlines = 0
+            _stream_filter.reset()
 
     try:
         while not event_path.exists():
@@ -137,19 +215,10 @@ def run_watcher(session_id: str, model_name: str) -> None:
                                 f"[dim]{_DIVIDER}[/dim]"
                             )
                             _in_stream = True
-                            _trailing_newlines = 0
-                        # Collapse excessive blank lines in streamed output
-                        filtered = []
-                        for ch in content:
-                            if ch == "\n":
-                                _trailing_newlines += 1
-                                if _trailing_newlines <= 2:
-                                    filtered.append(ch)
-                            else:
-                                _trailing_newlines = 0
-                                filtered.append(ch)
+                            _stream_filter.reset()
+                        filtered = _stream_filter.feed(content)
                         if filtered:
-                            sys.stdout.write("".join(filtered))
+                            sys.stdout.write(filtered)
                             sys.stdout.flush()
 
                     elif etype == "response":
