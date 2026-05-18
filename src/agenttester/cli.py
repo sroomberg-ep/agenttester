@@ -24,6 +24,14 @@ app = typer.Typer(
 console = Console()
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from importlib.metadata import version
+
+        print(f"agent-tester {version('agenttester')}")
+        raise typer.Exit()
+
+
 @app.callback()
 def default(
     ctx: typer.Context,
@@ -34,6 +42,13 @@ def default(
     resume: Annotated[
         str | None,
         typer.Option("--resume", "-r", help="Resume a previous session by ID"),
+    ] = None,
+    version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version", "-v", help="Show version and exit",
+            callback=_version_callback, is_eager=True,
+        ),
     ] = None,
 ) -> None:
     """Open the interactive REPL when no subcommand is given."""
