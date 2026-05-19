@@ -136,6 +136,18 @@ async def run_agent_loop(
             # don't use structured tool_use (e.g. qwen, some open models)
             if not tool_calls:
                 text = msg.get("content") or ""
+                stop_reason = msg.get("stop_reason", "")
+
+                # Model hit output token limit mid-generation — continue
+                if stop_reason == "max_tokens" and text:
+                    messages.append({"role": "assistant", "content": text})
+                    messages.append(
+                        {"role": "user", "content": "Continue from where you left off."}
+                    )
+                    if on_event:
+                        on_event("status", "output truncated — continuing")
+                    continue
+
                 tool_calls = _parse_text_tool_calls(text)
                 if not tool_calls:
                     messages.append({"role": "assistant", "content": text})
